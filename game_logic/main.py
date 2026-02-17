@@ -88,6 +88,10 @@ def main():
             print("Empty guess. Turn skipped.")
         else:
             result = game.make_guess(current_player_idx, guess)
+            if not result.get('is_valid', True):
+                print(f"ERROR: '{result['word']}' does not exist in the game vocabulary!")
+                continue
+
             print(f"Word: {result['word']}")
             print(f"Similarity: {result['similarity']:.4f}")
             print(f"Score Gained: +{result['score_gain']:.2f}")
