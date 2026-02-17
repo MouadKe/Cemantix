@@ -7,9 +7,6 @@ class WordSimilarityService:
     _models = {}
     _model_names = {
         'en': 'all-MiniLM-L6-v2',
-        # 'fr': 'dangvantuan/sentence-camembert-base', # Good but 400MB+
-        # 'ar': 'Omartificial-Intelligence-Space/Arabic-MiniLM-L12-v2-all-nli-triplet' # Good but ~400MB?
-        # Let's use smaller ones if possible, but for now these are standard "specific" ones.
         'fr': 'sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2',
         'ar': 'sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2'
     }
