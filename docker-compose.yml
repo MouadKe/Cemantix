@@ -1,0 +1,50 @@
+version: "3"
+
+services:
+  django:
+    build: ./backend
+    container_name: django_api
+    command: >
+      sh -c "
+      until nc -z mysql 3306; do
+        echo 'Waiting for MySQL...';
+        sleep 2;
+      done;
+      python manage.py migrate &&
+      python manage.py runserver 0.0.0.0:8000
+      "
+    volumes:
+      - ./backend:/app
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    depends_on:
+      - mysql
+      - chroma
+
+  mysql:
+    image: mysql:9.6
+    container_name: mysql_db
+    restart: always
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+
+  chroma:
+    image: chromadb/chroma:latest
+    container_name: chroma_db
+    ports:
+      - "8001:8000"
+    volumes:
+      - chroma_data:/chroma/.chroma
+
+volumes:
+  mysql_data:
+  chroma_data:
