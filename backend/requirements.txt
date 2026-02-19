@@ -2,5 +2,8 @@ Django
 chromadb
 mysqlclient
 
+daphne
+
 djangorestframework
 djangorestframework-simplejwt
+channels
