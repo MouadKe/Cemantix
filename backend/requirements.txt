@@ -6,4 +6,3 @@ daphne
 
 djangorestframework
 djangorestframework-simplejwt
-channels
