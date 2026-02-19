@@ -1,17 +1,14 @@
 import numpy as np
 import random
-import sys
-import os
-
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from game_logic.services import WordSimilarityService
+from game_logic.vector_db import VectorDB
 
 
 class HackerBot:
     def __init__(self, language='en'):
         self.language = language
         self.similarity_service = WordSimilarityService()
-        self.vector_search = IMAN_REPLACE()
+        self.vector_search = VectorDB()
 
     def get_next_guess(self, guesses, scoreboard, pack, bot_id):
         """
@@ -28,9 +25,24 @@ class HackerBot:
         if len(guesses) < 2:
             return self._themed_guess(pack, guesses)
 
-        # Step 3: Aggressive mode — try special strategies first
-        if mode == "aggressive":
+        # Step 3: Check if stuck (best similarity hasn't improved much recently)
+        is_stuck = self._is_stuck(guesses)
+        
+        if is_stuck:
+            # Panic mode: Try to find a completely new angle first
+            word = self._find_different_angle(guesses)
+            if word:
+                return word
+                
+            # If no different angle found, try a themed guess if applicable
+            if pack and pack != "mixed":
+                return self._themed_guess(pack, guesses)
+                
+            # Last resort: random word
+            return self._get_random_word()
 
+        # Step 4: Aggressive mode — try special strategies first
+        if mode == "aggressive":
             # Strategy 1: find a word from a different angle
             word = self._find_different_angle(guesses)
             if word:
@@ -44,8 +56,25 @@ class HackerBot:
                 if word:
                     return word
 
-        # Step 4: Normal mode (or aggressive fallback) → Pro Bot logic
+        # Step 5: Normal mode (or aggressive fallback) → Pro Bot logic
         return self._pro_bot_guess(guesses)
+
+    def _is_stuck(self, guesses):
+        """Returns True if the best similarity hasn't improved in the last 3 turns."""
+        if len(guesses) < 5:
+            return False
+            
+        recent_best = max([g["similarity"] for g in guesses[-3:]], default=0)
+        overall_best = max([g["similarity"] for g in guesses[:-3]], default=0)
+        
+        # If we haven't beaten the previous best by at least 0.5 in 3 turns, we are stuck
+        # (Assuming similarity is 0-100 scale)
+        if recent_best <= overall_best + 0.5:
+             # Also check if the best similarity is low (< 40). 
+             if overall_best < 40:
+                 return True
+                 
+        return False
 
     # ─── Strategy Selection ───────────────────────────────────────────────────
 
@@ -62,8 +91,7 @@ class HackerBot:
     def _find_different_angle(self, guesses):
         """
         Find a candidate near the best guess that is dissimilar
-        to all high-scoring guesses (cosine sim < 0.3).
-        Rewards the 'different angle' bonus.
+        to all high-scoring guesses (cosine sim < 0.6).
         """
         high_guesses = [g for g in guesses if g["similarity"] >= 50]
         if not high_guesses:
@@ -85,8 +113,8 @@ class HackerBot:
 
         guessed_words = {g["word"].lower() for g in guesses}
 
-        # Search broad neighborhood of the best guess
-        top_k = 50
+        # Search broad neighborhood of the best guess, but looking for DIFFERENT words
+        top_k = 100
         while True:
             candidates = self.vector_search.get_nearest_word(
                 v_best, self.language, top_k=top_k
@@ -97,25 +125,31 @@ class HackerBot:
             for candidate in candidates:
                 if candidate.lower() in guessed_words:
                     continue
+                    
                 v = self.vector_search.get_word_vector(candidate, self.language)
                 if v is None:
                     continue
-                # Must be dissimilar to all high-scoring guesses
-                if all(np.dot(v, gv) < 0.5 for gv in guess_vectors):
+                
+                # Check orthogonality/dissimilarity to other high scoring words
+                is_different = True
+                for gv in guess_vectors:
+                    sim = np.dot(v, gv)
+                    if sim > 0.6: # If >0.6 similarity to any other good guess, it's not "different" enough
+                        is_different = False
+                        break
+                
+                if is_different:
                     return candidate
 
-            # No valid candidate found in this range — expand or give up
-            if top_k >= 500:
+            # No valid candidate found in this range — expand
+            if top_k >= 2000:
                 return None
             top_k *= 2
 
     # ─── Strategy 2: Play Around Target ──────────────────────────────────────
 
     def _play_around_target(self, best_vector, guesses):
-        """
-        Exploit the high-similarity region by guessing words
-        very close to the current best guess.
-        """
+        """Exploit the high-similarity region by guessing words close to current best."""
         guessed_words = {g["word"].lower() for g in guesses}
         top_k = 10
 
@@ -130,61 +164,34 @@ class HackerBot:
                 if candidate.lower() not in guessed_words:
                     return candidate
 
-            if top_k >= 500:
+            if top_k >= 2000:
                 return None
             top_k *= 2
 
     # ─── Strategy 3: Theme-Based Guessing ────────────────────────────────────
 
     def _themed_guess(self, pack, guesses):
-        """
-        Use a semantically relevant seed vector for the given pack
-        instead of guessing randomly.
-        """
-        theme_anchors = {
-            "sports":            "sports athlete game team",
-            "history":           "history war empire ancient",
-            "science":           "science physics chemistry",
-            "computer_science":  "programming computer algorithm",
-        }
-
-        if pack == "mixed" or pack not in theme_anchors:
+        """Pick a random word from the active pack if available."""
+        if not pack or pack == "mixed":
             return self._get_random_word()
-
-        # Embed the theme anchor phrase
-        theme_vector = self.vector_search.get_word_vector(
-            theme_anchors[pack], self.language
-        )
-        if theme_vector is None:
-            return self._get_random_word()
-
-        norm = np.linalg.norm(theme_vector)
-        if norm > 0:
-            theme_vector = theme_vector / norm
-
+            
+        # Try to get words from the specific pack
+        pack_words = self.vector_search.get_pack_words(pack, self.language)
+        
         guessed_words = {g["word"].lower() for g in guesses}
-        top_k = 5
-
-        while True:
-            candidates = self.vector_search.get_nearest_word(
-                theme_vector, self.language, top_k=top_k
-            )
-            if not candidates:
-                return self._get_random_word()
-
-            for candidate in candidates:
-                if candidate.lower() not in guessed_words:
-                    return candidate
-
-            if top_k >= 500:
-                return self._get_random_word()
-            top_k *= 2
+        candidates = [w for w in pack_words if w not in guessed_words]
+        
+        if candidates:
+            return random.choice(candidates)
+            
+        return self._get_random_word()
 
     # ─── Pro Bot Fallback ─────────────────────────────────────────────────────
 
     def _pro_bot_guess(self, guesses):
         """
         Full Pro Bot logic — weighted target estimation using all guesses.
+        Re-implemented here to avoid dependency complications.
         """
         vectors = []
         scores = []
@@ -197,7 +204,7 @@ class HackerBot:
         if len(vectors) < 2:
             return self._get_random_word()
 
-        # Weighted estimate of target position
+        # Weighted estimate of target position (Simple Pro version)
         target_estimate = np.zeros_like(vectors[0])
         for v, s in zip(vectors, scores):
             weight = (s / 100.0) ** 3
@@ -251,4 +258,4 @@ class HackerBot:
         words = self.vector_search.get_word_list(self.language)
         if words:
             return random.choice(words)
-        return "doctor"  # extreme fallback
+        return "doctor"  # fallback

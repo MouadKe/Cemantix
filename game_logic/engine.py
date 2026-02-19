@@ -1,6 +1,6 @@
 import random
 import os
-from services import WordSimilarityService
+from game_logic.services import WordSimilarityService
 
 class Player:
     def __init__(self, name):
@@ -8,6 +8,9 @@ class Player:
         self.score = 0
         self.guesses = []
         self.best_similarity = -1.0
+        self.is_bot = False
+        self.difficulty = None
+        self.bot_agent = None
 
 class GameSession:
     def __init__(self, language='en', category=None, goal_word=None):
@@ -15,11 +18,9 @@ class GameSession:
         self.language = language
         self.category = category
         
-        # Base paths for word lists
         base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         word_list_path = os.path.join(base_path, "word_list")
         
-        # Path configuration
         self.paths = {
             'en': {
                 'packs': os.path.join(word_list_path, "packs"),
@@ -36,21 +37,16 @@ class GameSession:
         }
         
         lang_config = self.paths.get(language, self.paths['en'])
-        
-        # Load vocabulary for guess validation
         self.vocabulary = self._load_word_set(lang_config['vocab'])
         
-        # Load target word pool from packs
         category_name = f"{category}.txt" if category else "mixed.txt"
         pack_path = os.path.join(lang_config['packs'], category_name)
         
         self.target_pool = self._load_word_list(pack_path)
         if not self.target_pool:
-            # Fallback if specific pack fails
             fallback_path = os.path.join(lang_config['packs'], "mixed.txt")
             self.target_pool = self._load_word_list(fallback_path)
         
-        # Load model immediately
         print(f"Loading model for {language}...")
         self.similarity_service.load_model(language)
         
@@ -60,7 +56,6 @@ class GameSession:
         self.winner = None
 
     def _load_word_list(self, filepath):
-        """Loads words from a text file into a list."""
         if not os.path.exists(filepath):
             print(f"Warning: File not found: {filepath}")
             return []
@@ -72,17 +67,30 @@ class GameSession:
             return []
 
     def _load_word_set(self, filepath):
-        """Loads words from a text file into a set for fast lookup."""
         return set(self._load_word_list(filepath))
 
-    def add_player(self, name):
-        self.players.append(Player(name))
+    def add_player(self, name, is_bot=False, difficulty=None):
+        player = Player(name)
+        player.is_bot = is_bot
+        player.difficulty = difficulty
+        if is_bot:
+            from bots.Noob import NoobBot
+            from bots.Pro import ProBot
+            from bots.Hacker import HackerBot
+            
+            if difficulty == "noob":
+                player.bot_agent = NoobBot(self.language)
+            elif difficulty == "pro":
+                player.bot_agent = ProBot(self.language)
+            elif difficulty == "hacker":
+                player.bot_agent = HackerBot(self.language)
+                
+        self.players.append(player)
 
     def make_guess(self, player_idx, word):
         player = self.players[player_idx]
         word = word.lower().strip()
         
-        # Check if word exists in vocabulary
         if word not in self.vocabulary:
             return {
                 "word": word,
@@ -95,23 +103,19 @@ class GameSession:
         score_gain = 0
         notes = []
 
-        # 1. Correct Word (+200)
         if word == self.goal_word:
             score_gain += 200
             notes.append("CORRECT WORD (+200)")
             self.winner = player
         else:
-            # 2. Partial Score
             partial = max(0, similarity * 100)
             score_gain += partial
 
-        # 3. Best on Board (+50)
         if similarity > self.global_best_similarity and word != self.goal_word:
             score_gain += 50
             self.global_best_similarity = similarity
             notes.append("BEST ON BOARD (+50)")
 
-        # 4. Different Angle Bonus (+80)
         if similarity > 0.5:
             is_different_angle = True
             for prev_guess in player.guesses:

@@ -1,6 +1,5 @@
 import numpy as np
 from sentence_transformers import SentenceTransformer
-import os
 
 class WordSimilarityService:
     _instance = None

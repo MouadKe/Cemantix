@@ -3,10 +3,10 @@ import os
 import select
 import time
 
-# Ensure we can import from the current directory
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+# Ensure we can import from the project root
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from engine import GameSession
+from game_logic.engine import GameSession
 
 def input_with_timeout(prompt, timeout):
     sys.stdout.write(prompt)
@@ -15,7 +15,7 @@ def input_with_timeout(prompt, timeout):
     if ready:
         return sys.stdin.readline().strip()
     else:
-        sys.stdout.write("\n")  # Move to next line after timeout
+        sys.stdout.write("\n")
         return None
 
 def main():
@@ -55,11 +55,24 @@ def main():
             
     for i in range(num_players):
         name = input(f"Enter name for Player {i+1}: ").strip() or f"Player {i+1}"
-        game.add_player(name)
+        is_bot_choice = input(f"Is {name} a bot? (y/n) [default: n]: ").strip().lower()
+        is_bot = is_bot_choice.startswith('y')
+        
+        difficulty = None
+        if is_bot:
+            print(f"Select Difficulty for {name}:")
+            print("1. Noob")
+            print("2. Pro")
+            print("3. Hacker")
+            diff_choice = input("Enter difficulty (1-3) [default: 1]: ").strip()
+            diff_map = {'1': 'noob', '2': 'pro', '3': 'hacker', 'noob': 'noob', 'pro': 'pro', 'hacker': 'hacker'}
+            difficulty = diff_map.get(diff_choice, 'noob')
+            
+        game.add_player(name, is_bot=is_bot, difficulty=difficulty)
         
     print("\n--- GAME START ---")
     if num_players > 1:
-        print("Each player has 15 seconds to guess!")
+        print("Each player has 30 seconds to guess!")
     else:
         print("No timer for single player mode.")
     
@@ -72,12 +85,27 @@ def main():
         
         print(f"\n>> {current_player.name}'s Turn! (Score: {current_player.score:.2f})")
         
-        if num_players > 1:
-            guess = input_with_timeout("Enter guess: ", 15)
+        if current_player.is_bot:
+            print(f"{current_player.name} is thinking...")
+            time.sleep(1) 
+            
+            all_guesses = []
+            for p in game.players:
+                all_guesses.extend(p.guesses)
+            
+            if current_player.difficulty == "hacker":
+                scoreboard = {p.name: p.score for p in game.players}
+                guess = current_player.bot_agent.get_next_guess(all_guesses, scoreboard, category, current_player.name)
+            else:
+                guess = current_player.bot_agent.get_next_guess(all_guesses)
+                
+            print(f"Bot Guessed: {guess}")
+            
+        elif num_players > 1:
+            guess = input_with_timeout("Enter guess: ", 30)
         else:
             guess = input("Enter guess (or 'quit' to exit): ").strip()
-            if not guess: guess = "" # Handle empty input for single player manually if needed
-        
+            if not guess: guess = "" 
         
         if guess is None:
             print("TIMEOUT! Turn skipped.")
